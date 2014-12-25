@@ -1,9 +1,7 @@
 use core::prelude::*;
 
-use core::mem::transmute;
-use core::raw;
-use alloc::boxed::Box;
-use fn_box::FnBox;
+use core::intrinsics::abort;
+use core::ptr;
 
 use stack::Stack;
 use arch::{mod, Registers};
@@ -13,35 +11,39 @@ pub struct Context {
   stack: Stack
 }
 
-pub type BoxedFn<Args, Result> = Box<FnBox<Args, Result> + Send + 'static>;
-pub type StartFn<T, Args, Result> = fn(data: *mut T, f: BoxedFn<Args, Result>) -> !;
-
 impl Context {
-  pub fn new<T, Args, Result>(init: StartFn<T, Args, Result>, data: *mut T,
-                              f: BoxedFn<Args, Result>) -> Context {
+  pub fn new<F: FnOnce()>(f: F) -> Context {
     let mut stack = Stack::new(4 << 20);
-    let f: raw::TraitObject = unsafe { transmute(f) };
 
-    Context {
-      regs: arch::initialise_call_frame(&mut stack,
-        init_ctx::<T, Args, Result> as arch::uintptr_t,
-        &[init as arch::uintptr_t,
-          data as arch::uintptr_t,
-          f.data as arch::uintptr_t,
-          f.vtable as arch::uintptr_t]),
-      stack: stack
+    unsafe {
+      let mut ctx = Context {
+        regs: Registers::new(),
+        stack: Stack::native(-1 as *const u8)
+      };
+
+      let mut my_ctx = Context::native();
+
+      ctx.regs = arch::initialise_call_frame(&mut stack,
+        init_ctx::<F> as arch::uintptr_t,
+        &[&f as *const F as arch::uintptr_t,
+          &mut ctx as *mut Context as arch::uintptr_t,
+          &mut my_ctx as *mut Context as arch::uintptr_t]);
+
+      ctx.stack = stack;
+
+      Context::swap(&mut my_ctx, &mut ctx);
+
+      ctx
     }
   }
 }
 
-unsafe extern "C" fn init_ctx<T, A, R>(start: StartFn<T, A, R>, data: *mut T,
-                                       f_data: *mut (), f_vtable: *mut ()) -> ! {
-  let f: BoxedFn<A, R> = transmute(raw::TraitObject {
-    data: f_data,
-    vtable: f_vtable
-  });
-
-  start(data, f)
+unsafe extern "C" fn init_ctx<F: FnOnce()>(f: *const F, ctx: *mut Context,
+                                           parent_ctx: *mut Context) -> ! {
+  let f = ptr::read(f);
+  Context::swap(&mut *ctx, &mut *parent_ctx);
+  f();
+  abort();
 }
 
 impl Context {
