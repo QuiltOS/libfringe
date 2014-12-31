@@ -31,7 +31,8 @@ pub unsafe extern "fastcall" fn bootstrap
        "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
        : "volatile");
 
-  asm!("xchg $0 %rsp
+  asm!("skip:
+        xchg $0 %rsp
         ret;"
        :
        : "r" (us.stack_ptr)
