@@ -1,92 +1,113 @@
 use core::prelude::*;
 use core::simd::u64x2;
-use core::mem::{size_of, zeroed};
+use core::mem::{
+  size_of,
+  zeroed,
+  swap,
+  transmute,
+};
 
 use stack::Stack;
+use context::Context;
 
-extern "C" {
-  #[link_name = "lwt_bootstrap"]
-  pub fn bootstrap();
-  #[link_name = "lwt_swapcontext"]
-  pub fn swapcontext(save: *mut Registers, restore: *mut Registers);
-  #[link_name = "lwt_abort"]
-  pub fn abort() -> !;
-}
-
-#[allow(non_camel_case_types)]
-pub type uintptr_t = u64;
-
-#[repr(C)]
-#[allow(dead_code)]
-pub struct Registers {
-  rbx: u64,
-  rsp: u64,
-  rbp: u64,
-  rdi: u64,
-  r12: u64,
-  r13: u64,
-  r14: u64,
-  r15: u64,
-  ip:  u64,
-  xmm0: u64x2,
-  xmm1: u64x2,
-  xmm2: u64x2,
-  xmm3: u64x2,
-  xmm4: u64x2,
-  xmm5: u64x2,
-}
-
-impl Registers {
-  pub fn new() -> Registers {
-    unsafe {
-      Registers {
-        ip: abort as uintptr_t,
-        .. zeroed()
-      }
-    }
-  }
-}
-
-pub fn initialise_call_frame(stack: &mut Stack, init: uintptr_t, args: &[uintptr_t]) -> Registers {
-  let sp = stack.top() as *mut uintptr_t;
-  let sp = align_down_mut(sp, 16);
-  let sp = offset_mut(sp, -1);
+/// stack must be new/usused to preserve memory safety of objects on
+/// stack
+#[inline(always)]
+pub fn initialise_call_frame(stack:     &mut Stack,
+                             init:      fn() -> ())
+{
+  let sp    = stack.top();
+  let limit = stack.limit();
   unsafe {
-    *sp = 0;
+    asm!("pushq $0" :: "r" (init)  :: "volatile"); // for bootstrap
+    asm!("pushq $0" :: "r" (stack) :: "volatile"); // for bootstrap
+    asm!("pushq boostrap"         :::: "volatile"); // for rip
+    asm!("pushq"
+         :
+         : "{rdi}" (sp) "{0}" (limit)
+         : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", "rdi",
+         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+         "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+         "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
+         : "volatile");
+    asm!("popq %rdi
+        popq %rdi
+        popq %rdi"
+       :
+       :
+       : "rdi"
+       : "volatile"); // compensate for earlier pops
   }
-
-  let mut regs = Registers {
-    rbp: 0,
-    rsp: sp as uintptr_t,
-    ip: bootstrap as uintptr_t,
-    rbx: init,
-    .. Registers::new()
-  };
-
-  match into_fields!(regs { rdi, r12, r13, r14, r15 } <- args.iter().cloned()) {
-    Some(mut args) => if args.next().is_some() {
-      panic!("too many arguments")
-    },
-    None => {}
-  }
-
-  regs
 }
+
+#[allow(unused)]
+unsafe fn __bootstrap() {
+  panic!();
+
+  asm!("bootstrap:" :::: "volatile"); // enter here
+  {
+    let f:     fn() -> ();
+    let stack: *mut Stack;
+    asm!("popq $0
+          popq $1"
+         : "=r" (stack), "=r" (f)
+         :
+         :
+         : "volatile");
+    f();
+    let mut temp: Stack = zeroed();
+    swap(&mut temp, transmute(stack));
+  }
+  panic!();
+}
+
+
+#[inline(always)]
+pub unsafe fn swap_stack(stack_ptr: uint) {
+  asm!("pushq %rip" :::: "volatile");
+  asm!("pushq %fs:0x70
+        pushq %rip
+        xchg %rsp, $0
+        popq %rip
+        popq %fs:0x70"
+       :
+       : "{+rdi}" (stack_ptr) //+rdi to mimmick above
+       : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", "rdi",
+       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+       "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+       "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
+       : "volatile");
+  asm!("popq %rip" :::: "volatile");
+}
+
 
 // Rust stores a stack limit at [fs:0x70]. These two functions set and retrieve
 // the limit. They're marked as #[inline(always)] so that they can be used in
 // situations where the stack limit is invalid.
 
 #[inline(always)]
+pub unsafe fn get_sp() -> *const u8 {
+  let sp;
+  asm!("mov %rsp, $0" : "=r"(sp) ::: "volatile");
+  sp
+}
+
+
+#[inline(always)]
 pub unsafe fn get_sp_limit() -> *const u8 {
   let limit;
-  asm!("movq %fs:0x70, $0" : "=r"(limit) ::: "volatile");
+  asm!("mov %fs:0x70, $0" : "=r"(limit) ::: "volatile");
   limit
 }
 
 #[inline(always)]
+pub unsafe fn set_sp(sp: *const u8) {
+  asm!("mov $0, %rsp" :: "r"(sp) :: "volatile");
+}
+
+#[inline(always)]
 pub unsafe fn set_sp_limit(limit: *const u8) {
-  asm!("movq $0, %fs:0x70" :: "r"(limit) :: "volatile");
+  asm!("mov $0, %fs:0x70" :: "r"(limit) :: "volatile");
 }
 
 #[inline]

@@ -4,11 +4,11 @@ use core::intrinsics::abort;
 use core::ptr;
 
 use stack::Stack;
-use arch::{mod, Registers};
+use arch;
 
 pub struct Context {
-  regs: Registers,
-  stack: Stack
+  stack: Stack,
+  stack_ptr: uint,
 }
 
 impl Context {
@@ -17,17 +17,16 @@ impl Context {
 
     unsafe {
       let mut ctx = Context {
-        regs: Registers::new(),
         stack: Stack::native(-1 as *const u8)
       };
 
       let mut my_ctx = Context::native();
 
-      ctx.regs = arch::initialise_call_frame(&mut stack,
-        init_ctx::<F> as arch::uintptr_t,
-        &[&f as *const F as arch::uintptr_t,
-          &mut ctx as *mut Context as arch::uintptr_t,
-          &mut my_ctx as *mut Context as arch::uintptr_t]);
+      arch::initialise_call_frame(&mut stack,
+        init_ctx::<F> as uint,
+        &[&f          as *const F as uint,
+          &mut ctx    as *mut Context as uint,
+          &mut my_ctx as *mut Context as uint]);
 
       ctx.stack = stack;
 
@@ -49,7 +48,6 @@ unsafe extern "C" fn init_ctx<F: FnOnce()>(f: *const F, ctx: *mut Context,
 impl Context {
   pub unsafe fn native() -> Context {
     Context {
-      regs: Registers::new(),
       stack: Stack::native(arch::get_sp_limit())
     }
   }
@@ -58,6 +56,6 @@ impl Context {
   #[inline(always)]
   pub unsafe fn swap(out_context: &mut Context, in_context: &mut Context) {
     arch::set_sp_limit(in_context.stack.limit());
-    arch::swapcontext(&mut out_context.regs, &mut in_context.regs);
+    //arch::swapcontext(&mut out_context.regs, &mut in_context.regs);
   }
 }
