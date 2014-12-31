@@ -2,4 +2,3 @@
 name = "lwkt"
 version = "0.0.1"
 authors = ["Nathan Zadoks <nathan@nathan7.eu>"]
-build = "build.rs"

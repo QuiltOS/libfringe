@@ -8,19 +8,20 @@ use core::mem::{
 };
 
 use stack::Stack;
-use context::Context;
+use context::{mod, Context};
 
 /// stack must be new/usused to preserve memory safety of objects on
-/// stack
+/// stack. stack_ptr is assumed to be uninitialized
 #[inline(always)]
-pub fn initialise_call_frame(stack:     &mut Stack,
-                             init:      fn() -> ())
+pub fn initialise_call_frame(ctx:  &mut Ctx,
+                             init: fn() -> ())
 {
-  let sp    = stack.top();
+  ctx.stack_ptr = stack.top();
   let limit = stack.limit();
   unsafe {
+    
     asm!("pushq $0" :: "r" (init)  :: "volatile"); // for bootstrap
-    asm!("pushq $0" :: "r" (stack) :: "volatile"); // for bootstrap
+    asm!("pushq $0" :: "r" (sp)    :: "volatile"); // for bootstrap
     asm!("pushq boostrap"         :::: "volatile"); // for rip
     asm!("pushq"
          :
@@ -41,43 +42,32 @@ pub fn initialise_call_frame(stack:     &mut Stack,
 }
 
 #[allow(unused)]
-unsafe fn __bootstrap() {
-  panic!();
-
-  asm!("bootstrap:" :::: "volatile"); // enter here
-  {
-    let f:     fn() -> ();
-    let stack: *mut Stack;
-    asm!("popq $0
-          popq $1"
-         : "=r" (stack), "=r" (f)
-         :
-         :
-         : "volatile");
-    f();
-    let mut temp: Stack = zeroed();
-    swap(&mut temp, transmute(stack));
-  }
-  panic!();
+unsafe fn bootstrap<F: FnOnce()>(us:      &mut Context<()>,
+                                 spawner: &mut Context<&mut F>)
+{
+  let closure: F;
+  context::swap(&mut F, us, spawner);
+  // closure is now initialized
+  closure();
+  panic!("now what?!");
 }
 
-
-#[inline(always)]
-pub unsafe fn swap_stack(stack_ptr: uint) {
-  asm!("pushq %rip" :::: "volatile");
+// TODO use anycall
+#[inline(never)]
+pub unsafe extern "fastcall" /*"anyreg"*/ fn swap_help<A>(args: A, stack_ptr: &mut *mut u8) -> A {
   asm!("pushq %fs:0x70
-        pushq %rip
-        xchg %rsp, $0
-        popq %rip
+        mov ($0), %rsi
+        xchg %rsp, %rsi
+        mov %rsi, ($0)
         popq %fs:0x70"
        :
-       : "{+rdi}" (stack_ptr) //+rdi to mimmick above
-       : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", "rdi",
+       : "{rdi}" (stack_ptr)
+       : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", //"rdi",
        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
        "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
        "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
        : "volatile");
-  asm!("popq %rip" :::: "volatile");
+  args
 }
 
 

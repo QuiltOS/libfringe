@@ -6,9 +6,10 @@ use core::ptr;
 use stack::Stack;
 use arch;
 
-pub struct Context {
-  stack: Stack,
+pub struct Context<T> {
+  stack:     Stack,
   stack_ptr: uint,
+  _marker:   ::core::kinds::marker::ContravariantType,
 }
 
 impl Context {
@@ -51,11 +52,18 @@ impl Context {
       stack: Stack::native(arch::get_sp_limit())
     }
   }
+}
 
-
-  #[inline(always)]
-  pub unsafe fn swap(out_context: &mut Context, in_context: &mut Context) {
-    arch::set_sp_limit(in_context.stack.limit());
-    //arch::swapcontext(&mut out_context.regs, &mut in_context.regs);
+#[inline(always)]
+pub fn swap<A, B>(args:        A,
+                  out_context: &mut Context<B>,
+                  in_context:  &mut Context<A>) -> B
+{
+  unsafe {
+    out_context.stack_ptr = in_context.stack_ptr;
+    let f: unsafe extern "fastcall" /*"anyreg"*/ fn(A, *mut u8) -> B
+      = transmute(swap_help::<A>);
+    
+    f(args, &mut out_context.stack_ptr)
   }
 }
