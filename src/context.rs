@@ -1,69 +1,64 @@
 use core::prelude::*;
 
-use core::intrinsics::abort;
-use core::ptr;
+use core::kinds::marker::ContravariantType;
 
 use stack::Stack;
-use arch;
+
+#[path = "arch.rs"]
+mod arch;
+
 
 pub struct Context<T> {
-  stack:     Stack,
-  stack_ptr: uint,
-  _marker:   ::core::kinds::marker::ContravariantType,
+  _stack:     Stack, 
+  stack_ptr: *const u8,
+  _marker:   ContravariantType<T>,
 }
 
-impl Context {
-  pub fn new<F: FnOnce()>(f: F) -> Context {
+impl Context<()>
+{
+  pub fn new<F: FnOnce() + 'static>(f: F) -> Context<()> {
     let mut stack = Stack::new(4 << 20);
+    let sp    = stack.top();
 
-    unsafe {
-      let mut ctx = Context {
-        stack: Stack::native(-1 as *const u8)
-      };
+    let mut them = Context {
+      _stack:     stack,
+      stack_ptr: sp,
+      _marker:   ContravariantType,
+    };
 
-      let mut my_ctx = Context::native();
+    let slot: &mut F = unsafe {
+      let mut us: Context<&mut F> =
+        ::core::mem::transmute(Context::native());
 
-      arch::initialise_call_frame(&mut stack,
-        init_ctx::<F> as uint,
-        &[&f          as *const F as uint,
-          &mut ctx    as *mut Context as uint,
-          &mut my_ctx as *mut Context as uint]);
+      arch::bootstrap(&mut them, &mut us); // backwards because from opposite perspective
+      swap((), &mut us, &mut them)
+    };
 
-      ctx.stack = stack;
+    // move closure to new stack
+    *slot = f;
 
-      Context::swap(&mut my_ctx, &mut ctx);
-
-      ctx
-    }
+    them
   }
-}
 
-unsafe extern "C" fn init_ctx<F: FnOnce()>(f: *const F, ctx: *mut Context,
-                                           parent_ctx: *mut Context) -> ! {
-  let f = ptr::read(f);
-  Context::swap(&mut *ctx, &mut *parent_ctx);
-  f();
-  abort();
-}
-
-impl Context {
-  pub unsafe fn native() -> Context {
+  pub unsafe fn native() -> Context<()> {
     Context {
-      stack: Stack::native(arch::get_sp_limit())
+      _stack:     Stack::native(arch::get_sp_limit()),
+      stack_ptr: arch::get_sp() as *mut u8,
+      _marker:   ContravariantType,
     }
   }
 }
 
 #[inline(always)]
-pub fn swap<A, B>(args:        A,
-                  out_context: &mut Context<B>,
-                  in_context:  &mut Context<A>) -> B
+pub fn swap<'t, A, B>(args:        A,
+                      out_context: &'t mut Context<B>,
+                      in_context:  &'t mut Context<A>) -> B
 {
   unsafe {
     out_context.stack_ptr = in_context.stack_ptr;
-    let f: unsafe extern "fastcall" /*"anyreg"*/ fn(A, *mut u8) -> B
-      = transmute(swap_help::<A>);
-    
+    let f: unsafe extern "fastcall" /*"anyreg"*/ fn(A, &mut *const u8) -> B
+      = ::core::mem::transmute(arch::swap::<A>);
+
     f(args, &mut out_context.stack_ptr)
   }
 }

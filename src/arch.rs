@@ -1,60 +1,59 @@
 use core::prelude::*;
-use core::simd::u64x2;
-use core::mem::{
-  size_of,
-  zeroed,
-  swap,
-  transmute,
-};
 
-use stack::Stack;
 use context::{mod, Context};
 
-/// stack must be new/usused to preserve memory safety of objects on
-/// stack. stack_ptr is assumed to be uninitialized
-#[inline(always)]
-pub fn initialise_call_frame(ctx:  &mut Ctx,
-                             init: fn() -> ())
-{
-  ctx.stack_ptr = stack.top();
-  let limit = stack.limit();
-  unsafe {
-    
-    asm!("pushq $0" :: "r" (init)  :: "volatile"); // for bootstrap
-    asm!("pushq $0" :: "r" (sp)    :: "volatile"); // for bootstrap
-    asm!("pushq boostrap"         :::: "volatile"); // for rip
-    asm!("pushq"
-         :
-         : "{rdi}" (sp) "{0}" (limit)
-         : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", "rdi",
-         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
-         "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
-         "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
-         : "volatile");
-    asm!("popq %rdi
-        popq %rdi
-        popq %rdi"
-       :
-       :
-       : "rdi"
-       : "volatile"); // compensate for earlier pops
-  }
-}
-
+// TODO use anyreg and feel better about nothing on stack
+// TODO find some way to ensure no rust temporaries or arguments on the stack
 #[allow(unused)]
-unsafe fn bootstrap<F: FnOnce()>(us:      &mut Context<()>,
-                                 spawner: &mut Context<&mut F>)
+pub unsafe extern "fastcall" fn bootstrap
+  <F: FnOnce() + 'static>(us: &mut Context<()>, spawner: &mut Context<&'static mut F>)
 {
-  let closure: F;
-  context::swap(&mut F, us, spawner);
-  // closure is now initialized
-  closure();
+  // jank switch stacks / simulate cdecl
+  asm!("xchg $0 %rsp
+        push bootstrap_propper"
+       :
+       : "r" (us.stack_ptr)
+       : // what clobber ;)
+       : "volatile");
+
+  asm!("pushq %fs:0x70
+        mov ($0), %rsi
+        jump skip: # jk lol
+        # THE REST OF THIS ASM BLOCK IS DEAD
+        xchg %rsp, %rsi
+        mov %rsi, ($0)
+        popq %fs:0x70"
+       :
+       : "{rdi}" (spawner.stack_ptr)
+       : "rax", "rbx", "rcx", "rdx", "rbp", /* "rsp",*/ "rsi", //"rdi",
+       "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+       "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
+       "xmm8", "xmm9", "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15"
+       : "volatile");
+
+  asm!("xchg $0 %rsp
+        ret;"
+       :
+       : "r" (us.stack_ptr)
+       : // what clobber ;)
+       : "volatile");
+
+  asm!("bootstrap_proper:" :::: "volatile");
+  {
+    let mut closure: F = ::core::mem::uninitialized();
+    // init closure
+    // TODO forall lifetime . type
+    context::swap(::core::mem::transmute(&mut closure), us, spawner);
+    closure();
+  }
   panic!("now what?!");
 }
 
-// TODO use anycall
+// TODO use anyreg and no longer need clobbers
 #[inline(never)]
-pub unsafe extern "fastcall" /*"anyreg"*/ fn swap_help<A>(args: A, stack_ptr: &mut *mut u8) -> A {
+pub unsafe extern "fastcall" fn swap
+  <A>(args: A, stack_ptr: &mut *mut u8) -> A
+{
   asm!("pushq %fs:0x70
         mov ($0), %rsi
         xchg %rsp, %rsi
@@ -89,7 +88,7 @@ pub unsafe fn get_sp_limit() -> *const u8 {
   asm!("mov %fs:0x70, $0" : "=r"(limit) ::: "volatile");
   limit
 }
-
+/*
 #[inline(always)]
 pub unsafe fn set_sp(sp: *const u8) {
   asm!("mov $0, %rsp" :: "r"(sp) :: "volatile");
@@ -111,3 +110,4 @@ fn align_down_mut<T>(sp: *mut T, n: uint) -> *mut T {
 pub fn offset_mut<T>(ptr: *mut T, count: int) -> *mut T {
   (ptr as int + count * (size_of::<T>() as int)) as *mut T
 }
+*/

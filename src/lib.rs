@@ -1,4 +1,4 @@
-#![feature(default_type_params, macro_rules, phase, globs, asm)]
+#![feature(default_type_params, phase, globs, asm)]
 #![no_std]
 
 #[phase(plugin, link)]
@@ -9,11 +9,7 @@ pub use context::Context;
 
 mod std { pub use core::fmt; }
 
-#[macro_escape]
-mod macros;
-
 mod context;
 mod stack;
 
-mod arch;
 mod platform;
