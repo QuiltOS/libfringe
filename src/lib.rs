@@ -4,7 +4,6 @@
 #[phase(plugin, link)]
 extern crate core;
 extern crate alloc;
-extern crate fn_box;
 
 pub use context::Context;
 
