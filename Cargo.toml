@@ -25,8 +25,8 @@ simd = "0.1"
 rand = "0.3"
 
 [features]
-default = ["alloc", "valgrind"]
-alloc = []
+default = ["allocate", "valgrind"]
+allocate = ["alloc"]
 valgrind = ["valgrind_request"]
 
 # These apply only to tests within this library; assembly at -O0 is completely
@@ -36,3 +36,12 @@ opt-level = 1
 
 [profile.test]
 opt-level = 1
+
+[dependencies.core]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+branch = "rustos"
+
+[dependencies.alloc]
+git = "https://github.com/RustOS-Fork-Holding-Ground/rust.git"
+branch = "rustos"
+optional = true
