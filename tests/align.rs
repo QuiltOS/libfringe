@@ -7,10 +7,10 @@ extern crate rand;
 
 extern crate fringe;
 
-use fringe::Context;
+use fringe::NATIVE_THREAD_LOCALS;
+use fringe::pattern::cycle::{C1, Cycle};
 
-#[thread_local]
-static mut ctx_slot: *mut Context<'static, SliceStack<'static>> = 0 as *mut Context<_>;
+
 #[thread_local]
 static mut stack_buf: [u8; 4 << 20] = [0; 4 << 20];
 
@@ -29,16 +29,13 @@ fn stress_alignment(off: u8) {
 unsafe fn double_swap(off: u8) {
   let stack = SliceStack(&mut stack_buf[off as usize..]);
 
-  let mut ctx = Context::new(stack, move || {
+  let ctx: C1<'static, ()> = C1::new(stack, move |tl, (ctx, ())| {
     stress_alignment(off);
-    Context::swap(ctx_slot, ctx_slot);
-    panic!("Round {}: Do not come back!")
+    ctx.unwrap().kontinue(Some(tl), ())
   });
 
-  ctx_slot = &mut ctx;
-
   println!("Round {}: start!", off);
-  Context::swap(ctx_slot, ctx_slot);
+  let (_, ()) = ctx.swap(NATIVE_THREAD_LOCALS, ());
 }
 
 macro_rules! offset {

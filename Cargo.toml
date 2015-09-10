@@ -1,11 +1,16 @@
 [package]
-authors = ["Nathan Zadoks <nathan@nathan7.eu>"]
+authors = [ "Nathan Zadoks <nathan@nathan7.eu>",
+            "John Ericson <Ericson2314@Yahoo.com>" ]
 name = "fringe"
 version = "0.0.1"
 
 [dependencies.kernel32-sys]
 optional = true
 version = "0.2.2"
+
+[dependencies.log]
+version = "0.3.1"
+default-features = false
 
 [dependencies.libc]
 optional = true
@@ -25,6 +30,7 @@ optional = true
 version = "0.2.6"
 
 [dev-dependencies]
+env_logger = "0.3.1"
 simd = "0.1"
 rand = "0.3"
 

@@ -8,11 +8,11 @@
 #![feature(asm)]
 extern crate fringe;
 extern crate test;
-use fringe::Context;
-use test::black_box;
 
-#[thread_local]
-static mut ctx_slot: *mut Context<'static, fringe::OsStack> = 0 as *mut Context<_>;
+use fringe::NATIVE_THREAD_LOCALS;
+use fringe::pattern::cycle::{C1, Cycle};
+
+use test::black_box;
 
 const FE_DIVBYZERO: i32 = 0x4;
 extern {
@@ -22,21 +22,26 @@ extern {
 #[test]
 #[ignore]
 fn fpe() {
-  unsafe {
-    let stack = fringe::OsStack::new(4 << 20).unwrap();
+  let stack = fringe::OsStack::new(4 << 20).unwrap();
 
-    let mut ctx = Context::new(stack, move || {
-        println!("it's alive!");
-        loop {
-            println!("{:?}", 1.0/black_box(0.0));
-            Context::swap(ctx_slot, ctx_slot);
-        }
-    });
+  let mut ctx: C1<'static, ()> = C1::new(stack, move |tl, (mut ctx, ())| loop {
+    println!("it's alive!");
+    let c = ctx.unwrap();
+    assert!(c.0.thread_locals.is_none());
+    println!("{:?}", 1.0/black_box(0.0));
+    ctx = c.swap(Some(tl), ()).0;
+  });
 
-    ctx_slot = &mut ctx;
+  {
+    let (x, ()) = ctx.swap(NATIVE_THREAD_LOCALS, ());
+    println!("we're back!");
+    ctx = x.unwrap();
+  }
 
-    Context::swap(ctx_slot, ctx_slot);
-    feenableexcept(FE_DIVBYZERO);
-    Context::swap(ctx_slot, ctx_slot);
+  unsafe { feenableexcept(FE_DIVBYZERO) };
+
+  {
+    let (_, ()) = ctx.swap(NATIVE_THREAD_LOCALS, ());
+    println!("we're back again!");
   }
 }

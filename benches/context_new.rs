@@ -4,9 +4,11 @@
 #![feature(test)]
 extern crate test;
 extern crate fringe;
-use fringe::Context;
+use fringe::Stack;
+use fringe::NATIVE_THREAD_LOCALS;
+use fringe::pattern::cycle::{C1, Cycle};
 
-static mut ctx_slot: *mut Context<'static, SliceStack<'static>> = 0 as *mut Context<_>;
+
 static mut stack_buf: [u8; 1024] = [0; 1024];
 
 #[bench]
@@ -14,16 +16,24 @@ fn context_new(b: &mut test::Bencher) {
   b.iter(|| unsafe {
     let stack = SliceStack(&mut stack_buf);
 
-    let mut ctx = Context::new(stack, move || {
-      let ctx_ptr = ctx_slot;
-      loop {
-        Context::swap(ctx_ptr, ctx_ptr);
-      }
+    let ctx: C1<'static, ()> = C1::new(stack, move |tl, (ctx, ())| {
+      ctx.unwrap().kontinue(Some(tl), ())
     });
 
-    ctx_slot = &mut ctx;
+    ctx.swap(NATIVE_THREAD_LOCALS, ());
+  })
+}
 
-    Context::swap(ctx_slot, ctx_slot);
+#[bench]
+fn context_new_with_dead_loop(b: &mut test::Bencher) {
+  b.iter(|| unsafe {
+    let stack = SliceStack(&mut stack_buf);
+
+    let ctx: C1<'static, ()> = C1::new(stack, move |tl, (mut ctx, ())| loop {
+      ctx = ctx.unwrap().swap(Some(tl), ()).0;
+    });
+
+    ctx.swap(NATIVE_THREAD_LOCALS, ());
   })
 }
 
