@@ -4,7 +4,7 @@
 use void::Void;
 
 use stack::Stack;
-use arch::common::{push, rust_trampoline};
+use arch::common::{push, rust_trampoline, align_down_mut};
 
 pub const STACK_ALIGN: usize = 16;
 
@@ -20,6 +20,9 @@ impl Registers {
   {
     let mut sp = stack.top() as *mut usize;
     let f_ptr = push(&mut sp, f);
+
+    // align stack to make sure trampoline is called properly
+    sp = align_down_mut(sp, STACK_ALIGN);
 
     init!(sp, f_ptr, rust_trampoline::<F> as unsafe extern "C" fn(*const F) -> !);
 

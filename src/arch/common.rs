@@ -2,12 +2,9 @@
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>
 // See the LICENSE file included in this distribution.
 use core::mem::{size_of, align_of};
-use core::cmp::max;
 use core::ptr;
 
 use void::{self, Void};
-
-use super::imp::STACK_ALIGN;
 
 pub unsafe extern "C" fn rust_trampoline<F>(f: *const F) -> !
   where F: FnOnce() -> Void {
@@ -17,7 +14,7 @@ pub unsafe extern "C" fn rust_trampoline<F>(f: *const F) -> !
 pub unsafe fn push<T>(spp: &mut *mut usize, value: T) -> *mut T {
   let mut sp = *spp as *mut T;
   sp = offset_mut(sp, -1);
-  sp = align_down_mut(sp, max(align_of::<T>(), STACK_ALIGN));
+  sp = align_down_mut(sp, align_of::<T>());
   ptr::write(sp, value); // does not attempt to drop old value
   *spp = sp as *mut usize;
   sp
