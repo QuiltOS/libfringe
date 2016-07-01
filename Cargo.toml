@@ -24,6 +24,10 @@ version = "1"
 optional = true
 version = "0.2.6"
 
+[dev-dependencies]
+simd = "0.1"
+rand = "0.3"
+
 [features]
 default = ["os", "valgrind"]
 os = ["libc", "kernel32-sys", "winapi"]
