@@ -3,36 +3,45 @@
 // See the LICENSE file included in this distribution.
 use void::Void;
 
-use stack::Stack;
 use arch::common::{push, rust_trampoline, align_down_mut};
+use super::INIT_OFFSET;
 
 pub const STACK_ALIGN: usize = 16;
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Registers {
-  stack_pointer: *mut usize
+  stack_pointer: *mut usize,
 }
 
 impl Registers {
+  /// `A` must be the same size as a CPU Word
   #[inline]
-  pub unsafe fn new<S, F>(stack: &mut S, f: F) -> Registers
-    where S: Stack, F: FnOnce() -> Void
+  pub unsafe fn new<'a, A, F>(top:     *mut u8,
+                              closure: F)
+                              -> (Self, *mut F)
+    where F: FnOnce(Registers, A) -> Void + 'a,
   {
-    let mut sp = stack.top() as *mut usize;
-    let f_ptr = push(&mut sp, f);
+    let mut stack_ptr   = top as *mut usize;
+    let     closure_ptr = push(&mut stack_ptr, closure);
+
 
     // align stack to make sure trampoline is called properly
-    sp = align_down_mut(sp, STACK_ALIGN);
+    stack_ptr = stack_ptr.offset(INIT_OFFSET);
+    stack_ptr = align_down_mut(stack_ptr, STACK_ALIGN);
+    stack_ptr = stack_ptr.offset(-INIT_OFFSET);
 
-    init!(sp, f_ptr, rust_trampoline::<F> as unsafe extern "C" fn(*const F) -> !);
+    init!(stack_ptr,
+          closure_ptr,
+          rust_trampoline::<A, F> as unsafe extern "C" fn(A, _, _) -> !);
 
-    Registers {
-      stack_pointer: sp,
-    }
+    (Registers { stack_pointer: stack_ptr }, closure_ptr)
   }
 
+  /// `I` and `O` must be the same size as a CPU Word
   #[inline(always)]
-  pub unsafe fn swap(out_regs: *mut Registers, in_regs: *const Registers) {
-    swap!(&mut (*out_regs).stack_pointer, &(*in_regs).stack_pointer);
+  pub unsafe fn swap<I, O>(mut self, args: I) -> (Self, O) {
+    let params: O;
+    swap!(self.stack_pointer, params, args);
+    (self, params)
   }
 }

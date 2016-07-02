@@ -21,6 +21,8 @@ fn main() {
 
     ctx_slot = &mut ctx;
 
+    println!("About to leave!");
     Context::swap(ctx_slot, ctx_slot);
+    println!("We're back!")
   }
 }

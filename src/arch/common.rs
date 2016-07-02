@@ -6,9 +6,15 @@ use core::ptr;
 
 use void::{self, Void};
 
-pub unsafe extern "C" fn rust_trampoline<F>(f: *const F) -> !
-  where F: FnOnce() -> Void {
-  void::unreachable(ptr::read(f)())
+use super::imp::Registers;
+
+pub unsafe extern "C" fn rust_trampoline<'a, A, F>(a: A,
+                                                   s: Registers,
+                                                   f: *const F)
+                                                   -> !
+  where F: FnOnce(Registers, A) -> Void + 'a
+{
+  void::unreachable(ptr::read(f)(s, a))
 }
 
 pub unsafe fn push<T>(spp: &mut *mut usize, value: T) -> *mut T {

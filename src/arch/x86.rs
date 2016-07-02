@@ -3,95 +3,125 @@
 // See the LICENSE file included in this distribution.
 pub use self::common::*;
 
+const INIT_OFFSET: isize = 1;
+
 macro_rules! init {
-  ($sp:expr, $f_ptr:expr, $tramp:expr) => {
-    // initialise a new context
-    // arguments:
-    //  * eax: stack pointer
-    //  * ebx: function pointer
-    //  * ecx: data pointer
+  ($stack_ptr:expr, $closure_ptr:expr, $tramp_ptr:expr) => {
+    // Initialise a new context
     //
-    // return values:
-    //  * eax: new stack pointer
+    // Local passes:
+    //  * esi: stack pointer
+    //  * ebx: trampoline pointer
+    //  * edx: closure pointer
+    //
+    // Context swapping to new context passes:
+    //  * esi: their stack pointer (pass through)
+    //  * edi: args pointer
+    //
+    // Local gets:
+    //  * esi: new stack pointer
     asm!(
       r#"
-        // switch to the fresh stack
-        xchg %esp, %eax
+      1:
+        // Switch to the fresh stack
+        xchg %esp, %esi
 
-        // save the data pointer and the function pointer, respectively
-        pushl %ecx
-        pushl %ebx
+        // Save for trampoline call
+        pushl %edx // closure
+        pushl %ebx // trampoline
+        // Save the return address, control flow continues at label 3
+        call 3f
+      2:
+        // We arrive here once this context is reactivated (see swap.s)
 
-        // save the return address, control flow continues at label 1
-        call 1f
-        // we arrive here once this context is reactivated (see swap.s)
-
-        // restore the function pointer (the data pointer is the first argument, which lives at the top of the stack)
-        popl %eax
-
-        // initialise the frame pointer
+        // Initialise the frame pointer
         movl $$0, %ebp
 
-        // call the function pointer with the data pointer (top of the stack is the first argument)
-        call *%eax
+        // Restore trampoline pointer
+        popl %ebx
+
+        // Closure pointer stays on stack as third argument
+
+        // Old stack pointer goes as second argument
+        pushl %esi
+
+        // Args for closure goes as first argument
+        pushl %edi
+
+        // Call the trampoline
+        call *%ebx
 
         // crash if it ever returns
         ud2
 
-      1:
-        // save our neatly-setup new stack
-        xchg %esp, %eax
-        // back into Rust-land we go
+      3:
+        // Save our neatly-setup new stack
+        xchg %esp, %esi
+
+        // Back into Rust-land we go!
       "#
-      : "={eax}"($sp)
-      : "{eax}" ($sp),
-        "{ebx}" ($tramp),
-        "{ecx}" ($f_ptr)
+      : "={esi}" ($stack_ptr)
+      : "{esi}"  ($stack_ptr),
+        "{ebx}"  ($tramp_ptr),
+        "{edx}"  ($closure_ptr)
       :
       : "volatile")
   };
 }
 
 macro_rules! swap {
-  ($out_spp:expr, $in_spp:expr) => {
-    // switch to a new context
-    // arguments:
-    //  * eax: stack pointer out pointer
-    //  * ebx: stack pointer in pointer
+  ($stack_ptr:expr, $params:expr, $args:expr) => {
+    // Switch to a new context
+    //
+    // Local passes:
+    //  * esi: new stack pointer
+    //  * edi: pointer to args for new context
+    //
+    // Context swapping to here passes:
+    //  * esi: theirforeign stack pointer (pass through)
+    //  * edi: black-box args for this context
+    //
+    // Local gets:
+    //  * esi: foreign stack pointer (pass through)
+    //  * edi: black-box args for this context (pass through)
+    //
+    // Context swapped from here gets:
+    //  * esi: local stack pointer
+    //  * edi: black-box args for new context (pass through)
     asm!(
       r#"
-        // save the frame pointer
+      1:
+        // Save the base pointer -- LLVM screws up when we make it responsible
         pushl %ebp
 
-        // save the return address to the stack, control flow continues at label 1
-        call 1f
-        // we arrive here once this context is reactivated
+        // Save the return address to the stack
+        pushl $$2f
 
-        // restore the frame pointer
-        popl %ebp
+        // Swap the stack pointers
+        xchg %esp, %esi
 
-        // and we merrily go on our way, back into Rust-land
-        jmp 2f
-
-      1:
-        // retrieve the new stack pointer
-        movl (%eax), %edx
-        // save the old stack pointer
-        movl %esp, (%ebx)
-        // switch to the new stack pointer
-        movl %edx, %esp
-
-        // jump into the new context (return to the call point)
-        // doing this instead of a straight `ret` is 8ns slower,
+        // Jump into the new context (return to the call point).
+        //
+        // Doing this instead of a straight `ret` is 8ns slower,
         // presumably because the branch predictor tries to be clever about it
-        popl %eax
-        jmpl *%eax
+        //
+        // ebx is clobbered but that is OK
+        popl %ebx
+        jmp *%ebx
 
       2:
+        // We arrive here once this context is reactivated
+
+        // Restore the base pointer
+        popl %ebp
+
+        // And we merrily go on our way, back into Rust-land
       "#
-      :
-      : "{eax}" ($out_spp),
-        "{ebx}" ($in_spp)
+      : "={esi}" ($stack_ptr),
+        "={edi}" ($params)
+      : "{esi}"  ($stack_ptr),
+        "{edi}"  ($args)
+      // LLVM doesn't back up the base pointer right at all...!
       : "eax",  "ebx",  "ecx",  "edx",  "esi",  "edi", //"ebp",  "esp",
         "mmx0", "mmx1", "mmx2", "mmx3", "mmx4", "mmx5", "mmx6", "mmx7",
         "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",

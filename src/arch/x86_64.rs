@@ -3,103 +3,132 @@
 // See the LICENSE file included in this distribution.
 pub use self::common::*;
 
+const INIT_OFFSET: isize = 0;
+
 macro_rules! init {
-  ($sp:expr, $f_ptr:expr, $tramp:expr) => {
-    // initialise a new context
-    // arguments:
-    //  * rdi: stack pointer
-    //  * rsi: function pointer
-    //  * rdx: data pointer
+  ($stack_ptr:expr, $closure_ptr:expr, $tramp_ptr:expr) => {
+    // Initialise a new context
     //
-    // return values:
-    //  * rdi: new stack pointer
+    // Local passes:
+    //  * rsi: stack pointer
+    //  * rbx: trampoline pointer
+    //  * rdx: closure pointer
+    //
+    // Context swapping to new context passes:
+    //  * rsi: their stack pointer (pass through)
+    //  * rdi: args pointer
+    //
+    // Local gets:
+    //  * eax: new stack pointer
     asm!(
       r#"
-        // switch to the fresh stack
-        xchg %rsp, %rdi
+      1:
+        // Switch to the fresh stack
+        xchg %rsp, %rsi
 
-        // save the function pointer the data pointer, respectively
-        pushq %rsi
-        pushq %rdx
+        // Save for trampoline call
+        pushq %rdx // closure
+        pushq %rbx // trampoline
 
-        // save the return address, control flow continues at label 1
-        call 1f
-        // we arrive here once this context is reactivated (see swap.s)
+        // Save the return address, control flow continues at label 3
+        call 3f
+      2:
+        // We arrive here once this context is reactivated (see swap.s)
 
-        // restore the data pointer and the function pointer, respectively
-        popq %rdi
-        popq %rax
-
-        // initialise the frame pointer
+        // Initialise the frame pointer
         movq $$0, %rbp
 
-        // call the function pointer with the data pointer (rdi is the first argument)
-        call *%rax
+        // Restore trampoline pointer
+        popq %rbx
+
+        // Closure pointer popped off stack into reg for third argument
+        popq %rdx
+
+        // Old stack pointer stays in reg as second argument
+
+        // Args for closure stays in reg as first argument
+
+        // Call the trampoline
+        call *%rbx
 
         // crash if it ever returns
         ud2
 
-      1:
-        // save our neatly-setup new stack
-        xchg %rsp, %rdi
-        // back into Rust-land we go
+      3:
+        // Save our neatly-setup new stack
+        xchg %rsp, %rsi
+
+        // Back into Rust-land we go!
       "#
-      : "={rdi}"($sp)
-      : "{rdi}" ($sp),
-        "{rsi}" ($tramp),
-        "{rdx}" ($f_ptr)
+      : "={rsi}" ($stack_ptr)
+      : "{rsi}"  ($stack_ptr),
+        "{rbx}"  ($tramp_ptr),
+        "{rdx}"  ($closure_ptr)
       :
-      : "volatile");
-  }
+      : "volatile")
+  };
 }
 
 macro_rules! swap {
-  ($out_spp:expr, $in_spp:expr) => {
-    // switch to a new context
-    // arguments:
-    //  * rdi: stack pointer out pointer
-    //  * rsi: stack pointer in pointer
+  ($stack_ptr:expr, $params:expr, $args:expr) => {
+    // Switch to a new context
+    //
+    // Local passes:
+    //  * rsi: new stack pointer
+    //  * rdi: pointer to args for new context
+    //
+    // Context swapping to here passes:
+    //  * rsi: theirforeign stack pointer (pass through)
+    //  * rdi: black-box args for this context
+    //
+    // Local gets:
+    //  * rsi: foreign stack pointer (pass through)
+    //  * rdi: black-box args for this context (pass through)
+    //
+    // Context swapped from here gets:
+    //  * rsi: local stack pointer
+    //  * rdi: black-box args for new context (pass through)
     asm!(
       r#"
-        // make sure we leave the red zone alone
+      1:
+        // Make sure we leave the red zone alone
         sub $$128, %rsp
 
-        // save the frame pointer
+        // Save the base pointer -- LLVM screws up when we make it responsible
         pushq %rbp
 
-        // save the return address to the stack, control flow continues at label 1
-        call 1f
-        // we arrive here once this context is reactivated
+        // Save the return address to the stack
+        leaq 2f(%rip), %rax
+        pushq %rax
 
-        // restore the frame pointer
-        popq %rbp
+        // Swap the stack pointers
+        xchg %rsp, %rsi
 
-        // give back the red zone
-        add $$128, %rsp
-
-        // and we merrily go on our way, back into Rust-land
-        jmp 2f
-
-      1:
-        // retrieve the new stack pointer
-        movq (%rsi), %rax
-        // save the old stack pointer
-        movq %rsp, (%rdi)
-        // switch to the new stack pointer
-        movq %rax, %rsp
-
-        // jump into the new context (return to the call point)
-        // doing this instead of a straight `ret` is 8ns faster,
-        // presumably because the branch predictor tries
-        // to be clever about it otherwise
-        popq %rax
-        jmpq *%rax
+        // Jump into the new context (return to the call point).
+        //
+        // Doing this instead of a straight `ret` is 8ns slower,
+        // presumably because the branch predictor tries to be clever about it
+        //
+        // ebx is clobbered but that is OK
+        popq %rbx
+        jmp *%rbx
 
       2:
+        // We arrive here once this context is reactivated
+
+        // Restore the base pointer
+        popq %rbp
+
+        // Give back the red zone
+        add $$128, %rsp
+
+        // And we merrily go on our way, back into Rust-land
       "#
-      :
-      : "{rdi}" ($out_spp)
-        "{rsi}" ($in_spp)
+      : "={rsi}" ($stack_ptr),
+        "={rdi}" ($params)
+      : "{rsi}"  ($stack_ptr),
+        "{rdi}"  ($args)
+      // LLVM doesn't back up the base pointer right at all...!
       : "rax",   "rbx",   "rcx",   "rdx",   "rsi",   "rdi", //"rbp",   "rsp",
         "r8",    "r9",    "r10",   "r11",   "r12",   "r13",   "r14",   "r15",
         "xmm0",  "xmm1",  "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",
@@ -107,8 +136,8 @@ macro_rules! swap {
         "xmm16", "xmm17", "xmm18", "xmm19", "xmm20", "xmm21", "xmm22", "xmm23",
         "xmm24", "xmm25", "xmm26", "xmm27", "xmm28", "xmm29", "xmm30", "xmm31"
         "cc", "fpsr", "eflags"
-      : "volatile");
-  }
+      : "volatile")
+  };
 }
 
 #[path = "x86_common.rs"]

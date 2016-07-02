@@ -1,7 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>
 // See the LICENSE file included in this distribution.
-pub use self::imp::Registers;
+pub use self::imp::*;
 
 unsafe impl Send for Registers {}
 
