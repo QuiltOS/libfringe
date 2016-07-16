@@ -8,9 +8,9 @@ unsafe impl Send for Registers {}
 mod common;
 
 #[cfg(target_arch = "x86_64")]
-#[path = "x86_64/mod.rs"]
+#[path = "x86_64.rs"]
 mod imp;
 
 #[cfg(target_arch = "x86")]
-#[path = "x86/mod.rs"]
+#[path = "x86.rs"]
 mod imp;
