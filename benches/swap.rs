@@ -6,13 +6,16 @@
 extern crate test;
 extern crate fringe;
 
-use fringe::Context;
+use fringe::{Context, StackPointer};
 
 static mut ctx_slot: *mut Context<fringe::OsStack> = 0 as *mut Context<_>;
 
 #[bench]
 fn swap(b: &mut test::Bencher) {
-  unsafe extern "C" fn loopback(mut arg: usize) -> ! {
+  unsafe extern "C" fn loopback(
+    sp: StackPointer, spp: &mut StackPointer, mut arg: usize) -> !
+  {
+    *spp = sp;
     // This deliberately does not ignore arg, to measure the time it takes
     // to move the return value between registers.
     let ctx_ptr = ctx_slot;

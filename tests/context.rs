@@ -6,14 +6,17 @@
 extern crate simd;
 extern crate fringe;
 
-use fringe::Context;
+use fringe::{Context, StackPointer};
 
 #[thread_local]
 static mut ctx_slot: *mut Context<fringe::OsStack> = 0 as *mut Context<_>;
 
 #[test]
 fn context() {
-  unsafe extern "C" fn adder(arg: usize) -> ! {
+  unsafe extern "C" fn adder(
+    sp: StackPointer, spp: &mut StackPointer, arg: usize) -> !
+  {
+    *spp = sp;
     println!("it's alive! arg: {}", arg);
     let arg = Context::swap(ctx_slot, ctx_slot, arg + 1);
     println!("still alive! arg: {}", arg);
@@ -35,7 +38,10 @@ fn context() {
 
 #[test]
 fn context_simd() {
-  unsafe extern "C" fn permuter(arg: usize) -> ! {
+  unsafe extern "C" fn permuter(
+    sp: StackPointer, spp: &mut StackPointer, arg: usize) -> !
+  {
+    *spp = sp;
     // This will crash if the stack is not aligned properly.
     let x = simd::i32x4::splat(arg as i32);
     let y = x * x;

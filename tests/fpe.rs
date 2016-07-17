@@ -8,7 +8,7 @@
 #![feature(asm)]
 extern crate fringe;
 extern crate test;
-use fringe::Context;
+use fringe::{Context, StackPointer};
 use test::black_box;
 
 #[thread_local]
@@ -22,7 +22,10 @@ extern {
 #[test]
 #[ignore]
 fn fpe() {
-  unsafe extern "C" fn universe_destroyer(_arg: usize) -> ! {
+  unsafe extern "C" fn universe_destroyer(
+    sp: StackPointer, spp: &mut StackPointer, _arg: usize) -> !
+  {
+    *spp = sp;
     loop {
         println!("{:?}", 1.0/black_box(0.0));
         Context::swap(ctx_slot, ctx_slot, 0);

@@ -1,6 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // See the LICENSE file included in this distribution.
 
 //! To understand the code in this file, keep in mind this fact:
@@ -28,14 +29,20 @@ impl StackPointer {
   }
 }
 
-pub unsafe fn init(stack: &Stack, f: unsafe extern "C" fn(usize) -> !) -> StackPointer {
+pub unsafe fn init(
+  stack: &Stack,
+  fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
+  -> StackPointer
+{
   #[naked]
   unsafe extern "C" fn trampoline() -> ! {
     asm!(
       r#"
         # Pop function.
         popl    %ebx
-        # Push argument.
+        # Push arguments.
+        pushl   %edx
+        pushl   %esi
         pushl   %eax
         # Call it.
         call    *%ebx
@@ -45,16 +52,17 @@ pub unsafe fn init(stack: &Stack, f: unsafe extern "C" fn(usize) -> !) -> StackP
 
   let mut sp = StackPointer::new(stack);
   sp.push(0); // alignment
-  sp.push(0); // alignment
-  sp.push(0); // alignment
-  sp.push(f as usize); // function
+  sp.push(fun as usize);
   sp.push(trampoline as usize);
   sp
 }
 
 #[inline(always)]
-pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer) -> usize {
-  let ret: usize;
+pub unsafe fn swap(mut new_sp: StackPointer,
+                   mut arg0: usize,
+                   mut arg1: usize)
+                   -> (StackPointer, usize, usize)
+{
   asm!(
     r#"
       # Save frame pointer explicitly; LLVM doesn't spill it even if it is
@@ -69,12 +77,8 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
       jmp     2f
 
     1:
-      # Remember stack pointer of the old context, in case %rdx==%rsi.
-      movl    %esp, %ebx
-      # Load stack pointer of the new context.
-      movl    (%edx), %esp
-      # Save stack pointer of the old context.
-      movl    %ebx, (%esi)
+      # Swap current stack pointer with the new stack pointer
+      xchg    %esp, %eax
 
       # Pop instruction pointer of the new context (placed onto stack by
       # the call above) and jump there; don't use `ret` to avoid return
@@ -83,14 +87,16 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
       jmpl    *%ebx
     2:
     "#
-    : "={eax}" (ret)
-    : "{eax}" (arg)
-      "{esi}" (old_sp)
-      "{edx}" (new_sp)
+    : "={eax}" (new_sp.0)
+      "={esi}" (arg0)
+      "={edx}" (arg1)
+    : "{eax}" (new_sp.0)
+      "{esi}" (arg0)
+      "{edx}" (arg1)
     : "eax",  "ebx",  "ecx",  "edx",  "esi",  "edi", //"ebp",  "esp",
       "mmx0", "mmx1", "mmx2", "mmx3", "mmx4", "mmx5", "mmx6", "mmx7",
       "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
       "cc", "fpsr", "flags", "memory"
     : "volatile");
-  ret
+  (new_sp, arg0, arg1)
 }

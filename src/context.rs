@@ -1,7 +1,10 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // See the LICENSE file included in this distribution.
+use core::ptr;
+
 use stack;
 use debug;
 use arch;
@@ -26,9 +29,13 @@ unsafe impl<Stack> Send for Context<Stack>
 impl<Stack> Context<Stack> where Stack: stack::Stack {
   /// Creates a new Context. When it is swapped into, it will call
   /// `f(arg)`, where `arg` is the argument passed to `swap`.
-  pub unsafe fn new(stack: Stack, f: unsafe extern "C" fn(usize) -> !) -> Context<Stack> {
+  pub unsafe fn new(
+    stack: Stack,
+    fun: unsafe extern "C" fn(arch::StackPointer, &mut arch::StackPointer, usize) -> !)
+    -> Context<Stack>
+  {
     let stack_id  = debug::StackId::register(&stack);
-    let stack_ptr = arch::init(&stack, f);
+    let stack_ptr = arch::init(&stack, ::core::mem::transmute(fun));
     Context {
       stack:     stack,
       stack_id:  stack_id,
@@ -48,7 +55,14 @@ impl<OldStack> Context<OldStack> where OldStack: stack::Stack {
   pub unsafe fn swap<NewStack>(old_ctx: *mut Context<OldStack>,
                                new_ctx: *const Context<NewStack>,
                                arg: usize) -> usize
-      where NewStack: stack::Stack {
-    arch::swap(arg, &mut (*old_ctx).stack_ptr, &(*new_ctx).stack_ptr)
+    where NewStack: stack::Stack
+  {
+    let new_sp = ptr::read(&(*new_ctx).stack_ptr as *const _);
+    let (old_sp, old_spp, arg) = arch::swap(
+      new_sp,
+      &mut (*old_ctx).stack_ptr as *mut _ as usize,
+      arg);
+    ptr::write(old_spp as *mut arch::StackPointer, old_sp);
+    arg
   }
 }

@@ -1,6 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // See the LICENSE file included in this distribution.
 
 //! To understand the code in this file, keep in mind these two facts:
@@ -16,7 +17,6 @@
 //!   to pass a value while swapping context; this is an arbitrary choice
 //!   (we clobber all registers and could use any of them) but this allows us
 //!   to reuse the swap function to perform the initial call.
-
 use stack::Stack;
 
 #[derive(Debug)]
@@ -33,15 +33,23 @@ impl StackPointer {
   }
 }
 
-pub unsafe fn init(stack: &Stack, f: unsafe extern "C" fn(usize) -> !) -> StackPointer {
+pub unsafe fn init(
+  stack: &Stack,
+  fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
+  -> StackPointer
+{
   let mut sp = StackPointer::new(stack);
-  sp.push(0); // alignment
-  sp.push(f as usize);
+  sp.push(0 as usize); // alignment
+  sp.push(fun as usize);
   sp
 }
 
 #[inline(always)]
-pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer) -> usize {
+pub unsafe fn swap(new_sp: StackPointer,
+                   arg0: usize,
+                   arg1: usize)
+                   -> (StackPointer, usize, usize)
+{
   macro_rules! swap_body {
     () => {
       r#"
@@ -57,12 +65,8 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
         jmp     2f
 
       1:
-        # Remember stack pointer of the old context, in case %rdx==%rsi.
-        movq    %rsp, %rbx
-        # Load stack pointer of the new context.
-        movq    (%rdx), %rsp
-        # Save stack pointer of the old context.
-        movq    %rbx, (%rsi)
+        # Swap current stack pointer with the new stack pointer
+        xchg    %rsp, $0
 
         # Pop instruction pointer of the new context (placed onto stack by
         # the call above) and jump there; don't use `ret` to avoid return
@@ -76,13 +80,18 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
 
   #[cfg(not(windows))]
   #[inline(always)]
-  unsafe fn swap_impl(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer) -> usize {
-    let ret: usize;
+  pub unsafe fn swap_impl(mut new_sp: StackPointer,
+                          mut arg0: usize,
+                          mut arg1: usize)
+                          -> (StackPointer, usize, usize)
+  {
     asm!(swap_body!()
-      : "={rdi}" (ret)
-      : "{rdi}" (arg)
-        "{rsi}" (old_sp)
-        "{rdx}" (new_sp)
+      : "={rdi}" (new_sp.0)
+        "={rsi}" (arg0)
+        "={rdx}" (arg1)
+      : "{rdi}" (new_sp.0)
+        "{rsi}" (arg0)
+        "{rdx}" (arg1)
       : "rax",   "rbx",   "rcx",   "rdx",   "rsi",   "rdi", //"rbp",   "rsp",
         "r8",    "r9",    "r10",   "r11",   "r12",   "r13",   "r14",   "r15",
         "xmm0",  "xmm1",  "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",
@@ -96,19 +105,24 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
         // the "alignstack" LLVM inline assembly option does exactly the same
         // thing on x86_64.
       : "volatile", "alignstack");
-    ret
+    (new_sp, arg0, arg1)
   }
 
 
   #[cfg(windows)]
   #[inline(always)]
-  unsafe fn swap_impl(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer) -> usize {
-    let ret: usize;
+  pub unsafe fn swap_impl(mut new_sp: StackPointer,
+                          mut arg0: usize,
+                          mut arg1: usize)
+                          -> (StackPointer, usize, usize)
+  {
     asm!(swap_body!()
-      : "={rcx}" (ret)
-      : "{rcx}" (arg)
-        "{rsi}" (old_sp)
-        "{rdx}" (new_sp)
+      : "={rcx}" (new_sp.0)
+        "={rdx}" (arg0)
+        "={r8}"  (arg1)
+      : "{rcx}" (new_sp.0)
+        "{rdx}" (arg0)
+        "{r8}"  (arg1)
       : "rax",   "rbx",   "rcx",   "rdx",   "rsi",   "rdi", //"rbp",   "rsp",
         "r8",    "r9",    "r10",   "r11",   "r12",   "r13",   "r14",   "r15",
         "xmm0",  "xmm1",  "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",
@@ -122,8 +136,8 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer)
         // the "alignstack" LLVM inline assembly option does exactly the same
         // thing on x86_64.
       : "volatile", "alignstack");
-    ret
+    (new_sp, arg0, arg1)
   }
 
-  swap_impl(arg, old_sp, new_sp)
+  swap_impl(new_sp, arg0, arg1)
 }

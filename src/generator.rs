@@ -12,6 +12,7 @@ use core::marker::PhantomData;
 use core::iter::Iterator;
 use core::{ptr, mem};
 
+use arch::StackPointer;
 use stack;
 use context;
 
@@ -79,8 +80,11 @@ impl<Item, Stack> Generator<Item, Stack>
   /// guarded stacks do not exist, e.g. in absence of an MMU.
   pub unsafe fn unsafe_new<F>(stack: Stack, f: F) -> Generator<Item, Stack>
       where F: FnOnce(&mut Yielder<Item, Stack>) + Send {
-    unsafe extern "C" fn generator_wrapper<Item, Stack, F>(info: usize) -> !
-        where Item: Send, Stack: stack::Stack, F: FnOnce(&mut Yielder<Item, Stack>) {
+    unsafe extern "C" fn generator_wrapper<Item, Stack, F>
+      (sp: StackPointer, spp: &mut StackPointer, info: usize) -> !
+      where Item: Send, Stack: stack::Stack, F: FnOnce(&mut Yielder<Item, Stack>)
+    {
+      *spp = sp;
       // Retrieve our environment from the callee and return control to it.
       let (mut yielder, f) = ptr::read(info as *mut (Yielder<Item, Stack>, F));
       let new_context = context::Context::swap(yielder.context, yielder.context, 0);
