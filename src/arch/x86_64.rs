@@ -17,29 +17,15 @@
 //!   to pass a value while swapping context; this is an arbitrary choice
 //!   (we clobber all registers and could use any of them) but this allows us
 //!   to reuse the swap function to perform the initial call.
-use stack::Stack;
+use stack_pointer::StackPointer;
 
-#[derive(Debug)]
-pub struct StackPointer(*mut usize);
-
-impl StackPointer {
-  unsafe fn new(stack: &Stack) -> StackPointer {
-    StackPointer(stack.top() as *mut usize)
-  }
-
-  unsafe fn push(&mut self, val: usize) {
-    self.0 = self.0.offset(-1);
-    *self.0 = val
-  }
-}
-
+#[inline(always)]
 pub unsafe fn init(
-  stack: &Stack,
+  mut sp: StackPointer,
   fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
   -> StackPointer
 {
-  let mut sp = StackPointer::new(stack);
-  sp.push(0 as usize); // alignment
+  sp.push(0usize); // alignment
   sp.push(fun as usize);
   sp
 }

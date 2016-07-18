@@ -12,7 +12,7 @@ use core::marker::PhantomData;
 use core::iter::Iterator;
 use core::{ptr, mem};
 
-use arch::StackPointer;
+use stack_pointer::StackPointer;
 use stack;
 use context;
 

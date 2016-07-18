@@ -13,24 +13,11 @@
 //! * i686 SysV C ABI passes the first argument on the stack. This is
 //!   unfortunate, because unlike every other architecture we can't reuse
 //!   `swap` for the initial call, and so we use a trampoline.
-use stack::Stack;
+use stack_pointer::StackPointer;
 
-#[derive(Debug)]
-pub struct StackPointer(*mut usize);
-
-impl StackPointer {
-  unsafe fn new(stack: &Stack) -> StackPointer {
-    StackPointer(stack.top() as *mut usize)
-  }
-
-  unsafe fn push(&mut self, val: usize) {
-    self.0 = self.0.offset(-1);
-    *self.0 = val
-  }
-}
-
+#[inline(always)]
 pub unsafe fn init(
-  stack: &Stack,
+  mut sp: StackPointer,
   fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
   -> StackPointer
 {
@@ -50,8 +37,7 @@ pub unsafe fn init(
     ::core::intrinsics::unreachable()
   }
 
-  let mut sp = StackPointer::new(stack);
-  sp.push(0); // alignment
+  sp.push(0usize); // alignment
   sp.push(fun as usize);
   sp.push(trampoline as usize);
   sp

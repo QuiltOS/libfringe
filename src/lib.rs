@@ -31,7 +31,7 @@ extern crate std;
 
 pub use stack::Stack;
 pub use stack::GuardedStack;
-pub use arch::StackPointer;
+pub use stack_pointer::StackPointer;
 pub use context::Context;
 pub use generator::Generator;
 
@@ -42,6 +42,7 @@ mod arch;
 mod debug;
 
 mod stack;
+mod stack_pointer;
 mod context;
 pub mod generator;
 

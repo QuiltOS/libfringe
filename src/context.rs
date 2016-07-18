@@ -6,8 +6,8 @@
 use core::ptr;
 
 use stack;
+use stack_pointer::StackPointer;
 use debug;
-use arch;
 
 /// Context holds a suspended thread of execution along with a stack.
 ///
@@ -20,7 +20,7 @@ use arch;
 pub struct Context<Stack: stack::Stack> {
   stack:     Stack,
   stack_id:  debug::StackId,
-  stack_ptr: arch::StackPointer
+  stack_ptr: StackPointer
 }
 
 unsafe impl<Stack> Send for Context<Stack>
@@ -31,11 +31,11 @@ impl<Stack> Context<Stack> where Stack: stack::Stack {
   /// `f(arg)`, where `arg` is the argument passed to `swap`.
   pub unsafe fn new(
     stack: Stack,
-    fun: unsafe extern "C" fn(arch::StackPointer, &mut arch::StackPointer, usize) -> !)
+    fun: unsafe extern "C" fn(StackPointer, &mut StackPointer, usize) -> !)
     -> Context<Stack>
   {
     let stack_id  = debug::StackId::register(&stack);
-    let stack_ptr = arch::init(&stack, ::core::mem::transmute(fun));
+    let stack_ptr = StackPointer::init(&stack, ::core::mem::transmute(fun));
     Context {
       stack:     stack,
       stack_id:  stack_id,
@@ -58,11 +58,11 @@ impl<OldStack> Context<OldStack> where OldStack: stack::Stack {
     where NewStack: stack::Stack
   {
     let new_sp = ptr::read(&(*new_ctx).stack_ptr as *const _);
-    let (old_sp, old_spp, arg) = arch::swap(
+    let (old_sp, old_spp, arg) = StackPointer::swap(
       new_sp,
       &mut (*old_ctx).stack_ptr as *mut _ as usize,
       arg);
-    ptr::write(old_spp as *mut arch::StackPointer, old_sp);
+    ptr::write(old_spp as *mut StackPointer, old_sp);
     arg
   }
 }
