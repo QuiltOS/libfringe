@@ -46,6 +46,7 @@ pub use os::Stack as OsStack;
 
 mod arch;
 mod debug;
+mod stack_pointer;
 
 mod context;
 mod stack;

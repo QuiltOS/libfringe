@@ -44,11 +44,9 @@
 // * The 1st init trampoline together with the swap trampoline also restore %rbp
 //   when unwinding as well as returning normally, because LLVM does not do it for us.
 use stack::Stack;
+use stack_pointer::StackPointer;
 
-#[derive(Debug, Clone)]
-pub struct StackPointer(*mut usize);
-
-pub unsafe fn init(stack: &Stack, f: unsafe extern "C" fn(usize) -> !) -> StackPointer {
+pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
   #[cfg(not(target_vendor = "apple"))]
   #[naked]
   unsafe extern "C" fn trampoline_1() {
@@ -116,18 +114,11 @@ pub unsafe fn init(stack: &Stack, f: unsafe extern "C" fn(usize) -> !) -> StackP
       : : : "memory" : "volatile")
   }
 
-  unsafe fn push(sp: &mut StackPointer, val: usize) {
-    sp.0 = sp.0.offset(-1);
-    *sp.0 = val
-  }
-
-  let mut sp = StackPointer(stack.base() as *mut usize);
-  push(&mut sp, 0xdeaddeaddead0cfa); // CFA slot
-  push(&mut sp, 0 as usize); // alignment
-  push(&mut sp, f as usize); // function
-  push(&mut sp, trampoline_1 as usize);
-  push(&mut sp, 0xdeaddeaddeadbbbb); // saved %rbp
-  sp
+  sp.push(0xdeaddeaddead0cfa_usize); // CFA slot
+  sp.push(0 as usize); // alignment
+  sp.push(f as usize); // function
+  sp.push(trampoline_1 as usize);
+  sp.push(0xdeaddeaddeadbbbb_usize); // saved %rbp
 }
 
 #[inline(always)]

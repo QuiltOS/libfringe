@@ -6,8 +6,8 @@
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
 use stack;
+use stack_pointer::StackPointer;
 use debug;
-use arch;
 
 /// Context holds a suspended thread of execution along with a stack.
 ///
@@ -20,7 +20,7 @@ use arch;
 pub struct Context<Stack: stack::Stack> {
   stack:     Stack,
   stack_id:  debug::StackId,
-  stack_ptr: arch::StackPointer
+  stack_ptr: StackPointer
 }
 
 unsafe impl<Stack> Send for Context<Stack>
@@ -29,9 +29,13 @@ unsafe impl<Stack> Send for Context<Stack>
 impl<Stack> Context<Stack> where Stack: stack::Stack {
   /// Creates a new Context. When it is swapped into, it will call
   /// `f(arg)`, where `arg` is the argument passed to `swap`.
-  pub unsafe fn new(stack: Stack, f: unsafe extern "C" fn(usize) -> !) -> Context<Stack> {
+  pub unsafe fn new(
+    stack: Stack,
+    fun: unsafe extern "C" fn(usize) -> !)
+    -> Context<Stack>
+  {
     let stack_id  = debug::StackId::register(&stack);
-    let stack_ptr = arch::init(&stack, f);
+    let stack_ptr = StackPointer::init(&stack, fun);
     Context {
       stack:     stack,
       stack_id:  stack_id,
@@ -51,8 +55,10 @@ impl<OldStack> Context<OldStack> where OldStack: stack::Stack {
   pub unsafe fn swap<NewStack>(old_ctx: *mut Context<OldStack>,
                                new_ctx: *const Context<NewStack>,
                                arg: usize) -> usize
-      where NewStack: stack::Stack {
-    arch::swap(arg, &mut (*old_ctx).stack_ptr, &(*new_ctx).stack_ptr, &(*new_ctx).stack)
+    where NewStack: stack::Stack
+  {
+    StackPointer::swap(arg, &mut (*old_ctx).stack_ptr,
+                       &(*new_ctx).stack_ptr, &(*new_ctx).stack)
   }
 }
 
