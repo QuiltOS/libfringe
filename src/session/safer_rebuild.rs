@@ -10,7 +10,7 @@ use stack_pointer::StackPointer;
 use super::context::*;
 
 // Commented to avoid cyclic problems
-pub unsafe trait RebuildWithTl<'a>/*: RebuildRaw<b
+pub unsafe trait RebuildWithTl<'a>/*: RebuildRaw<
     'a,
     Payload = (Option<&'a mut ThreadLocals<Self::OldStack>>,
                Self::PayloadRaw)
