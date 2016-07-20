@@ -3,7 +3,7 @@ use core::ptr;
 
 use stack::Stack;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 /// The bare-minimum context, largely unsafe to use but exposed for the building
 /// of other abstractions.
 pub struct StackPointer(pub *mut usize);
@@ -17,12 +17,17 @@ impl StackPointer {
     sp
   }
 
+  #[inline]
+  pub fn new<S: Stack>(stack: &S) -> StackPointer {
+    StackPointer(stack.top() as *mut _)
+  }
+
   pub unsafe fn init(
-    stack: &Stack,
+    &self,
     fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
     -> StackPointer
   {
-    ::arch::init(StackPointer(stack.top() as _), fun)
+    ::arch::init(StackPointer(self.0), fun)
   }
 
   #[inline(always)]

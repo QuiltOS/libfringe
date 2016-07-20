@@ -35,7 +35,7 @@ impl<Stack> Context<Stack> where Stack: stack::Stack {
     -> Context<Stack>
   {
     let stack_id  = debug::StackId::register(&stack);
-    let stack_ptr = StackPointer::init(&stack, ::core::mem::transmute(fun));
+    let stack_ptr = StackPointer::new(&stack).init(::core::mem::transmute(fun));
     Context {
       stack:     stack,
       stack_id:  stack_id,

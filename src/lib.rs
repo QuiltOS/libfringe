@@ -2,6 +2,11 @@
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>
 // See the LICENSE file included in this distribution.
 #![feature(asm)]
+#![feature(slice_patterns)]
+#![feature(unboxed_closures)]
+#![feature(unique)]
+#![feature(pub_restricted)]
+#![feature(specialization)]
 #![cfg_attr(target_arch = "x86", feature(naked_functions, core_intrinsics))]
 #![no_std]
 
@@ -29,6 +34,10 @@
 #[macro_use]
 extern crate std;
 
+#[macro_use]
+extern crate log;
+extern crate void;
+
 pub use stack::Stack;
 pub use stack::GuardedStack;
 pub use stack_pointer::StackPointer;
@@ -44,7 +53,9 @@ mod debug;
 mod stack;
 mod stack_pointer;
 mod context;
+mod fat_args;
 pub mod generator;
+pub mod session;
 
 #[cfg(any(unix, windows))]
 mod os;
