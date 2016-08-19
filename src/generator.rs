@@ -113,7 +113,7 @@ impl<Input, Output, Stack> Generator<Input, Output, Stack>
       *spp = sp;
       // Retrieve our environment from the callee and return control to it.
       let (mut yielder, f) = ptr::read(env as *mut (Yielder<Input, Output, Stack>, F));
-      let data = Context::swap(yielder.context, yielder.context, 0);
+      let data = Context::swap(yielder.context, 0);
       // See the second half of Yielder::suspend_bare.
       let (new_context, input) = ptr::read(data as *mut (*mut Context<Stack>, Input));
       yielder.context = new_context as *mut Context<Stack>;
@@ -131,7 +131,7 @@ impl<Input, Output, Stack> Generator<Input, Output, Stack>
 
     // Transfer environment to the callee.
     let mut env = (Yielder::new(&mut generator.context), f);
-    Context::swap(&mut generator.context, &generator.context,
+    Context::swap(&mut generator.context,
                   &mut env as *mut (Yielder<Input, Output, Stack>, F) as usize);
     mem::forget(env);
 
@@ -153,7 +153,7 @@ impl<Input, Output, Stack> Generator<Input, Output, Stack>
         let val = unsafe {
           let mut data_in = (&mut self.context as *mut Context<Stack>, input);
           let data_out =
-            ptr::read(Context::swap(&mut self.context, &self.context,
+            ptr::read(Context::swap(&mut self.context,
                                     &mut data_in as *mut (*mut Context<Stack>, Input)  as usize)
                       as *mut Option<Output>);
           mem::forget(data_in);
@@ -205,7 +205,7 @@ impl<Input, Output, Stack> Yielder<Input, Output, Stack>
   #[inline(always)]
   fn suspend_bare(&mut self, mut val: Option<Output>) -> Input {
     unsafe {
-      let data = Context::swap(self.context, self.context,
+      let data = Context::swap(self.context,
                                &mut val as *mut Option<Output> as usize);
       mem::forget(val);
       let (new_context, input) = ptr::read(data as *mut (*mut Context<Stack>, Input));

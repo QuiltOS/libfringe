@@ -52,19 +52,15 @@ impl<Stack> Context<Stack> where Stack: stack::Stack {
   }
 }
 
-impl<OldStack> Context<OldStack> where OldStack: stack::Stack {
+impl<CStack> Context<CStack> where CStack: stack::Stack {
   /// Switches to `in_ctx`, saving the current thread of execution to `out_ctx`.
   #[inline(always)]
-  pub unsafe fn swap<NewStack>(old_ctx: *mut Context<OldStack>,
-                               new_ctx: *const Context<NewStack>,
-                               arg: usize) -> usize
-    where NewStack: stack::Stack
-  {
-    let new_sp = ptr::read(&(*new_ctx).stack_ptr as *const _);
+  pub unsafe fn swap(ctx_ptr: *mut Context<CStack>, arg: usize) -> usize {
+    let new_sp = ptr::read(&(*ctx_ptr).stack_ptr as *const _);
     let (old_sp, old_spp, arg) = StackPointer::swap(
-      &(*new_ctx).stack,
+      &(*ctx_ptr).stack,
       new_sp,
-      &mut (*old_ctx).stack_ptr as *mut _ as usize,
+      &mut (*ctx_ptr).stack_ptr as *mut _ as usize,
       arg);
     ptr::write(old_spp as *mut StackPointer, old_sp);
     arg
@@ -92,9 +88,9 @@ mod test {
     {
       *spp = sp;
       println!("it's alive! arg: {}", arg);
-      let arg = Context::swap(ctx_slot, ctx_slot, arg + 1);
+      let arg = Context::swap(ctx_slot, arg + 1);
       println!("still alive! arg: {}", arg);
-      Context::swap(ctx_slot, ctx_slot, arg + 1);
+      Context::swap(ctx_slot, arg + 1);
       panic!("i should be dead");
     }
 
@@ -103,9 +99,9 @@ mod test {
       let mut ctx = Context::new(stack, adder);
       ctx_slot = &mut ctx;
 
-      let ret = Context::swap(ctx_slot, ctx_slot, 10);
+      let ret = Context::swap(ctx_slot, 10);
       assert_eq!(ret, 11);
-      let ret = Context::swap(ctx_slot, ctx_slot, 50);
+      let ret = Context::swap(ctx_slot, 50);
       assert_eq!(ret, 51);
     }
   }
@@ -121,12 +117,12 @@ mod test {
       let x = simd::i32x4::splat(arg as i32);
       let y = x * x;
       println!("simd result: {:?}", y);
-      Context::swap(ctx_slot, ctx_slot, 0);
+      Context::swap(ctx_slot, 0);
       // And try again after a context switch.
       let x = simd::i32x4::splat(arg as i32);
       let y = x * x;
       println!("simd result: {:?}", y);
-      Context::swap(ctx_slot, ctx_slot, 0);
+      Context::swap(ctx_slot, 0);
       panic!("i should be dead");
     }
 
@@ -135,8 +131,8 @@ mod test {
       let mut ctx = Context::new(stack, permuter);
       ctx_slot = &mut ctx;
 
-      Context::swap(ctx_slot, ctx_slot, 10);
-      Context::swap(ctx_slot, ctx_slot, 20);
+      Context::swap(ctx_slot, 10);
+      Context::swap(ctx_slot, 20);
     }
   }
 
@@ -148,7 +144,7 @@ mod test {
     match arg {
       0 => panic!("arg=0"),
       1 => {
-        Context::swap(ctx_slot, ctx_slot, 0);
+        Context::swap(ctx_slot, 0);
         panic!("arg=1");
       }
       _ => unreachable!()
@@ -162,7 +158,7 @@ mod test {
       let stack = OsStack::new(4 << 20).unwrap();
       let mut ctx = Context::new(stack, do_panic);
 
-      Context::swap(&mut ctx, &ctx, 0);
+      Context::swap(&mut ctx, 0);
     }
   }
 
@@ -174,8 +170,8 @@ mod test {
       let mut ctx = Context::new(stack, do_panic);
       ctx_slot = &mut ctx;
 
-      Context::swap(&mut ctx, &ctx, 1);
-      Context::swap(&mut ctx, &ctx, 0);
+      Context::swap(&mut ctx, 1);
+      Context::swap(&mut ctx, 0);
     }
   }
 
@@ -189,7 +185,7 @@ mod test {
       // This deliberately does not ignore arg, to measure the time it takes
       // to move the return value between registers.
       let ctx_ptr = ctx_slot;
-      loop { arg = Context::swap(ctx_ptr, ctx_ptr, arg) }
+      loop { arg = Context::swap(ctx_ptr, arg) }
     }
 
     unsafe {
@@ -198,7 +194,7 @@ mod test {
       ctx_slot = &mut ctx;
 
       let ctx_ptr = &mut ctx;
-      b.iter(|| Context::swap(ctx_ptr, ctx_ptr, 0));
+      b.iter(|| Context::swap(ctx_ptr, 0));
     }
   }
 }
