@@ -1,10 +1,13 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
 // copied, modified, or distributed except according to those terms.
+use core::ptr;
+
 use stack;
 use stack_pointer::StackPointer;
 use debug;
@@ -31,11 +34,11 @@ impl<Stack> Context<Stack> where Stack: stack::Stack {
   /// `f(arg)`, where `arg` is the argument passed to `swap`.
   pub unsafe fn new(
     stack: Stack,
-    fun: unsafe extern "C" fn(usize) -> !)
+    fun: unsafe extern "C" fn(StackPointer, &mut StackPointer, usize) -> !)
     -> Context<Stack>
   {
     let stack_id  = debug::StackId::register(&stack);
-    let stack_ptr = StackPointer::init(&stack, fun);
+    let stack_ptr = StackPointer::init(&stack, ::core::mem::transmute(fun));
     Context {
       stack:     stack,
       stack_id:  stack_id,
@@ -57,8 +60,14 @@ impl<OldStack> Context<OldStack> where OldStack: stack::Stack {
                                arg: usize) -> usize
     where NewStack: stack::Stack
   {
-    StackPointer::swap(arg, &mut (*old_ctx).stack_ptr,
-                       &(*new_ctx).stack_ptr, &(*new_ctx).stack)
+    let new_sp = ptr::read(&(*new_ctx).stack_ptr as *const _);
+    let (old_sp, old_spp, arg) = StackPointer::swap(
+      &(*new_ctx).stack,
+      new_sp,
+      &mut (*old_ctx).stack_ptr as *mut _ as usize,
+      arg);
+    ptr::write(old_spp as *mut StackPointer, old_sp);
+    arg
   }
 }
 
@@ -69,6 +78,7 @@ mod test {
 
   use std::ptr;
   use super::Context;
+  use stack_pointer::StackPointer;
   use ::OsStack;
 
   #[thread_local]
@@ -76,7 +86,11 @@ mod test {
 
   #[test]
   fn context() {
-    unsafe extern "C" fn adder(arg: usize) -> ! {
+    unsafe extern "C" fn adder(sp: StackPointer,
+                               spp: &mut StackPointer,
+                               arg: usize) -> !
+    {
+      *spp = sp;
       println!("it's alive! arg: {}", arg);
       let arg = Context::swap(ctx_slot, ctx_slot, arg + 1);
       println!("still alive! arg: {}", arg);
@@ -98,7 +112,11 @@ mod test {
 
   #[test]
   fn context_simd() {
-    unsafe extern "C" fn permuter(arg: usize) -> ! {
+    unsafe extern "C" fn permuter(sp: StackPointer,
+                                  spp: &mut StackPointer,
+                                  arg: usize) -> !
+    {
+      *spp = sp;
       // This will crash if the stack is not aligned properly.
       let x = simd::i32x4::splat(arg as i32);
       let y = x * x;
@@ -122,7 +140,11 @@ mod test {
     }
   }
 
-  unsafe extern "C" fn do_panic(arg: usize) -> ! {
+  unsafe extern "C" fn do_panic(sp: StackPointer,
+                                spp: &mut StackPointer,
+                                arg: usize) -> !
+  {
+    *spp = sp;
     match arg {
       0 => panic!("arg=0"),
       1 => {
@@ -159,7 +181,11 @@ mod test {
 
   #[bench]
   fn swap(b: &mut test::Bencher) {
-    unsafe extern "C" fn loopback(mut arg: usize) -> ! {
+    unsafe extern "C" fn loopback(sp: StackPointer,
+                                  spp: &mut StackPointer,
+                                  mut arg: usize) -> !
+    {
+      *spp = sp;
       // This deliberately does not ignore arg, to measure the time it takes
       // to move the return value between registers.
       let ctx_ptr = ctx_slot;

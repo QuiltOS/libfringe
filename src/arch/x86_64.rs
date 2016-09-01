@@ -1,6 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
@@ -46,7 +47,9 @@
 use stack::Stack;
 use stack_pointer::StackPointer;
 
-pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
+pub unsafe fn init(sp: &mut StackPointer,
+                   f: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
+{
   #[cfg(not(target_vendor = "apple"))]
   #[naked]
   unsafe extern "C" fn trampoline_1() {
@@ -115,15 +118,19 @@ pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
   }
 
   sp.push(0xdeaddeaddead0cfa_usize); // CFA slot
-  sp.push(0 as usize); // alignment
+  sp.push(0usize); // alignment
   sp.push(f as usize); // function
   sp.push(trampoline_1 as usize);
   sp.push(0xdeaddeaddeadbbbb_usize); // saved %rbp
 }
 
 #[inline(always)]
-pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
-                   new_stack: &Stack) -> usize {
+pub unsafe fn swap(new_stack: &Stack,
+                   mut new_sp: StackPointer,
+                   mut arg0: usize,
+                   mut arg1: usize)
+                   -> (StackPointer, usize, usize)
+{
   // Address of the topmost CFA stack slot.
   let new_cfa = (new_stack.base() as *mut usize).offset(-1);
 
@@ -136,12 +143,8 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
         # the call instruction that invoked the trampoline.
         pushq   %rbp
 
-        # Remember stack pointer of the old context, in case %rdx==%rsi.
-        movq    %rsp, %rbx
-        # Load stack pointer of the new context.
-        movq    (%rdx), %rsp
-        # Save stack pointer of the old context.
-        movq    %rbx, (%rsi)
+        # Swap current stack pointer with the new stack pointer
+        xchg    %rsp, %rdi
 
         # Restore frame pointer of the new context.
         popq    %rbp
@@ -154,22 +157,20 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
       : : : "memory" : "volatile")
   }
 
-  let ret: usize;
   asm!(
     r#"
       # Link the call stacks together.
       movq    %rsp, (%rcx)
       # Push instruction pointer of the old context and switch to
       # the new context.
-      call    ${1:c}
+      call    ${3:c}
     "#
-    : "={rdi}" (ret)
+    : "+{rdi}" (new_sp.0)
+      "+{rsi}" (arg0)
+      "+{rdx}" (arg1)
     : "s" (trampoline as usize)
-      "{rdi}" (arg)
-      "{rsi}" (old_sp)
-      "{rdx}" (new_sp)
       "{rcx}" (new_cfa)
-    : "rax",   "rbx",   "rcx",   "rdx",   "rsi", /*"rdi",   "rbp",   "rsp",*/
+    : "rax",   "rbx",   "rcx", /*"rdx",   "rsi",   "rdi",   "rbp",   "rsp",*/
       "r8",    "r9",    "r10",   "r11",   "r12",   "r13",   "r14",   "r15",
       "xmm0",  "xmm1",  "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",
       "xmm8",  "xmm9",  "xmm10", "xmm11", "xmm12", "xmm13", "xmm14", "xmm15",
@@ -182,5 +183,5 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
       // the "alignstack" LLVM inline assembly option does exactly the same
       // thing on x86_64.
     : "volatile", "alignstack");
-  ret
+  (new_sp, arg0, arg1)
 }

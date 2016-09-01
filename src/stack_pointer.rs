@@ -1,3 +1,11 @@
+// This file is part of libfringe, a low-level green threading library.
+// Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
+//               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
+// Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
+// http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
+// http://opensource.org/licenses/MIT>, at your option. This file may not be
+// copied, modified, or distributed except according to those terms.
 use core::mem::align_of;
 use core::ptr;
 
@@ -19,7 +27,7 @@ impl StackPointer {
 
   pub unsafe fn init(
     stack: &Stack,
-    fun: unsafe extern "C" fn(usize) -> !)
+    fun: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
     -> StackPointer
   {
     let mut sp = StackPointer(stack.base() as _);
@@ -28,11 +36,13 @@ impl StackPointer {
   }
 
   #[inline(always)]
-  pub unsafe fn swap(arg: usize,
-                     old_sp: &mut StackPointer,
-                     new_sp: &StackPointer,
-                     new_stack: &Stack) -> usize{
-    ::arch::swap(arg, old_sp, new_sp, new_stack)
+  pub unsafe fn swap(new_stack: &Stack,
+                     new_sp: StackPointer,
+                     arg0: usize,
+                     arg1: usize)
+                     -> (StackPointer, usize, usize)
+  {
+    ::arch::swap(new_stack, new_sp, arg0, arg1)
   }
 }
 

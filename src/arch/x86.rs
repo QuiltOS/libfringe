@@ -1,6 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
@@ -42,7 +43,8 @@
 use stack::Stack;
 use stack_pointer::StackPointer;
 
-pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
+pub unsafe fn init(sp: &mut StackPointer,
+                   f: unsafe extern "C" fn(StackPointer, usize, usize) -> !) {
   #[naked]
   unsafe extern "C" fn trampoline_1() {
     asm!(
@@ -78,25 +80,35 @@ pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
         # Set up the second part of our DWARF CFI.
         # When unwinding the frame corresponding to this function, a DWARF unwinder
         # will restore %ebx (and thus CFA of the first trampoline) from the stack slot.
-        .cfi_offset %ebx, 4
-        # Push argument.
+        .cfi_offset %ebx, 12
+        # Push arguments.
         .cfi_def_cfa_offset 8
+        pushl   %edx
+        .cfi_def_cfa_offset 12
+        pushl   %esi
+        .cfi_def_cfa_offset 16
         pushl   %eax
         # Call the provided function.
-        call    *8(%esp)
+        call    *16(%esp)
       "#
       : : : "memory" : "volatile")
   }
 
   sp.push(0xdead0cfa_usize); // CFA slot
+  sp.push(0usize); // alignment
+  sp.push(0usize); // alignment
   sp.push(f as usize); // function
   sp.push(trampoline_1 as usize);
   sp.push(0xdeadbbbb_usize); // saved %ebp
 }
 
 #[inline(always)]
-pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
-                   new_stack: &Stack) -> usize {
+pub unsafe fn swap(new_stack: &Stack,
+                   mut new_sp: StackPointer,
+                   mut arg0: usize,
+                   mut arg1: usize)
+                   -> (StackPointer, usize, usize)
+{
   // Address of the topmost CFA stack slot.
   let new_cfa = (new_stack.base() as *mut usize).offset(-1);
 
@@ -109,12 +121,8 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
         # the call instruction that invoked the trampoline.
         pushl   %ebp
 
-        # Remember stack pointer of the old context, in case %edx==%esi.
-        movl    %esp, %ebx
-        # Load stack pointer of the new context.
-        movl    (%edx), %esp
-        # Save stack pointer of the old context.
-        movl    %ebx, (%esi)
+        # Swap current stack pointer with the new stack pointer
+        xchg    %esp, %eax
 
         # Restore frame pointer of the new context.
         popl    %ebp
@@ -127,25 +135,23 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
       : : : "memory" : "volatile")
   }
 
-  let ret: usize;
   asm!(
     r#"
       # Link the call stacks together.
       movl    %esp, (%edi)
       # Push instruction pointer of the old context and switch to
       # the new context.
-      call    ${1:c}
+      call    ${3:c}
     "#
-    : "={eax}" (ret)
+    : "+{eax}" (new_sp.0)
+      "+{esi}" (arg0)
+      "+{edx}" (arg1)
     : "s" (trampoline as usize)
-      "{eax}" (arg)
-      "{esi}" (old_sp)
-      "{edx}" (new_sp)
       "{edi}" (new_cfa)
-    :/*"eax",*/"ebx", "ecx",  "edx",  "esi",  "edi",/*"ebp",  "esp",*/
+    :/*"eax",*/"ebx", "ecx",/*"edx",  "esi",*/"edi",/*"ebp",  "esp",*/
       "mmx0", "mmx1", "mmx2", "mmx3", "mmx4", "mmx5", "mmx6", "mmx7",
       "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7",
       "cc", "fpsr", "flags", "memory"
     : "volatile");
-  ret
+  (new_sp, arg0, arg1)
 }

@@ -14,6 +14,7 @@
 use core::marker::PhantomData;
 use core::{ptr, mem};
 
+use stack_pointer::StackPointer;
 use stack;
 use context::Context;
 
@@ -104,9 +105,12 @@ impl<Input, Output, Stack> Generator<Input, Output, Stack>
   /// See also the [contract](../trait.Stack.html) that needs to be fulfilled by `stack`.
   pub unsafe fn unsafe_new<F>(stack: Stack, f: F) -> Generator<Input, Output, Stack>
       where F: FnOnce(&mut Yielder<Input, Output, Stack>, Input) + Send {
-    unsafe extern "C" fn generator_wrapper<Input, Output, Stack, F>(env: usize) -> !
+    unsafe extern "C" fn generator_wrapper<Input, Output, Stack, F>
+      (sp: StackPointer, spp: &mut StackPointer, env: usize) -> !
         where Input: Send, Output: Send, Stack: stack::Stack,
-              F: FnOnce(&mut Yielder<Input, Output, Stack>, Input) {
+              F: FnOnce(&mut Yielder<Input, Output, Stack>, Input)
+    {
+      *spp = sp;
       // Retrieve our environment from the callee and return control to it.
       let (mut yielder, f) = ptr::read(env as *mut (Yielder<Input, Output, Stack>, F));
       let data = Context::swap(yielder.context, yielder.context, 0);

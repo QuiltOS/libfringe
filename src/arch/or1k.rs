@@ -1,6 +1,7 @@
 // This file is part of libfringe, a low-level green threading library.
 // Copyright (c) Nathan Zadoks <nathan@nathan7.eu>,
 //               whitequark <whitequark@whitequark.org>
+//               John Ericson <Ericson2314@Yahoo.com>
 // Licensed under the Apache License, Version 2.0, <LICENSE-APACHE or
 // http://apache.org/licenses/LICENSE-2.0> or the MIT license <LICENSE-MIT or
 // http://opensource.org/licenses/MIT>, at your option. This file may not be
@@ -41,7 +42,9 @@
 use stack::Stack;
 use stack_pointer::StackPointer;
 
-pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
+pub unsafe fn init(sp: &mut StackPointer,
+                   f: unsafe extern "C" fn(StackPointer, usize, usize) -> !)
+{
   #[naked]
   unsafe extern "C" fn trampoline_1() {
     asm!(
@@ -96,8 +99,12 @@ pub unsafe fn init(sp: &mut StackPointer, f: unsafe extern "C" fn(usize) -> !) {
 }
 
 #[inline(always)]
-pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
-                   new_stack: &Stack) -> usize {
+pub unsafe fn swap(new_stack: &Stack,
+                   mut new_sp: StackPointer,
+                   mut arg0: usize,
+                   mut arg1: usize)
+                   -> (StackPointer, usize, usize)
+{
   // Address of the topmost CFA stack slot.
   let new_cfa = (new_stack.base() as *mut usize).offset(-1);
 
@@ -113,12 +120,12 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
         # the call instruction that invoked the trampoline.
         l.sw    -8(r1), r2
 
-        # Remember stack pointer of the old context, in case r5==r4.
+        # Remember stack pointer of the old context in r13
         l.or    r13, r0, r1
-        # Load stack pointer of the new context.
-        l.lwz   r1, 0(r5)
-        # Save stack pointer of the old context.
-        l.sw    0(r4), r13
+        # Move the stack pointer of the new context into r1
+        l.or    r1, r0, r3
+        # Move the saved stack stackpointer of the old context into r3
+        l.or    r3, r0, r13
 
         # Restore frame pointer of the new context.
         l.lwz   r2, -8(r1)
@@ -138,16 +145,15 @@ pub unsafe fn swap(arg: usize, old_sp: &mut StackPointer, new_sp: &StackPointer,
       l.sw    0(r6), r1
       # Put instruction pointer of the old context into r9 and switch to
       # the new context.
-      l.jal   ${1}
+      l.jal   ${3}
       l.nop
     "#
-    : "={r3}" (ret)
+    : "+{r3}" (new_sp.0)
+      "+{r4}" (arg0)
+      "+{r5}" (arg1)
     : "s" (trampoline as usize)
-      "{r3}" (arg)
-      "{r4}" (old_sp)
-      "{r5}" (new_sp)
       "{r6}" (new_cfa)
-    :/*"r0", "r1",  "r2",  "r3",*/"r4",  "r5",  "r6",  "r7",
+    :/*"r0", "r1",  "r2",  "r3",  "r4",  "r5",*/"r6",  "r7",
       "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15",
       "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",
       "r24", "r25", "r26", "r27", "r28", "r29", "r30", "r31",
