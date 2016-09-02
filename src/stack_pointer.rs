@@ -36,13 +36,17 @@ impl StackPointer {
   }
 
   #[inline(always)]
-  pub unsafe fn swap(new_stack: &Stack,
+  pub unsafe fn swap(new_stack: Option<&mut Stack>,
                      new_sp: StackPointer,
                      arg0: usize,
                      arg1: usize)
                      -> (StackPointer, usize, usize)
   {
-    ::arch::swap(new_stack, new_sp, arg0, arg1)
+    let cfa_slot = new_stack.map(|stack| {
+      // Address of the topmost CFA stack slot.
+      &mut *(stack.base() as *mut usize).offset(-1)
+    });
+    ::arch::swap(cfa_slot, new_sp, arg0, arg1)
   }
 }
 

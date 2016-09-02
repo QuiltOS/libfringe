@@ -39,7 +39,6 @@
 //   unwinding at the swap call site instead of falling off the end of context stack.
 // * The 1st init trampoline together with the swap trampoline also restore r2
 //   when unwinding as well as returning normally, because LLVM does not do it for us.
-use stack::Stack;
 use stack_pointer::StackPointer;
 
 pub unsafe fn init(sp: &mut StackPointer,
@@ -99,14 +98,16 @@ pub unsafe fn init(sp: &mut StackPointer,
 }
 
 #[inline(always)]
-pub unsafe fn swap(new_stack: &Stack,
+pub unsafe fn swap(cfa_slot: Option<&mut usize>,
                    mut new_sp: StackPointer,
                    mut arg0: usize,
                    mut arg1: usize)
                    -> (StackPointer, usize, usize)
 {
-  // Address of the topmost CFA stack slot.
-  let new_cfa = (new_stack.base() as *mut usize).offset(-1);
+  if let Some(ref cfa_slot) = cfa_slot {
+    // Link the call stacks together.
+    asm!("l.sw    0(r6), r1" :: "{r6}" (cfa_slot) : "memory");
+  }
 
   #[naked]
   unsafe extern "C" fn trampoline() {
@@ -141,8 +142,6 @@ pub unsafe fn swap(new_stack: &Stack,
   let ret: usize;
   asm!(
     r#"
-      # Link the call stacks together.
-      l.sw    0(r6), r1
       # Put instruction pointer of the old context into r9 and switch to
       # the new context.
       l.jal   ${3}
@@ -152,7 +151,6 @@ pub unsafe fn swap(new_stack: &Stack,
       "+{r4}" (arg0)
       "+{r5}" (arg1)
     : "s" (trampoline as usize)
-      "{r6}" (new_cfa)
     :/*"r0", "r1",  "r2",  "r3",  "r4",  "r5",*/"r6",  "r7",
       "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15",
       "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23",

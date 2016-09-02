@@ -44,7 +44,6 @@
 //   unwinding at the swap call site instead of falling off the end of context stack.
 // * The 1st init trampoline together with the swap trampoline also restore %rbp
 //   when unwinding as well as returning normally, because LLVM does not do it for us.
-use stack::Stack;
 use stack_pointer::StackPointer;
 
 pub unsafe fn init(sp: &mut StackPointer,
@@ -125,14 +124,16 @@ pub unsafe fn init(sp: &mut StackPointer,
 }
 
 #[inline(always)]
-pub unsafe fn swap(new_stack: &Stack,
+pub unsafe fn swap(cfa_slot: Option<&mut usize>,
                    mut new_sp: StackPointer,
                    mut arg0: usize,
                    mut arg1: usize)
                    -> (StackPointer, usize, usize)
 {
-  // Address of the topmost CFA stack slot.
-  let new_cfa = (new_stack.base() as *mut usize).offset(-1);
+  if let Some(ref cfa_slot) = cfa_slot {
+    // Link the call stacks together.
+    asm!("movq    %rsp, (%rcx)" :: "{rcx}" (cfa_slot) : "memory");
+  }
 
   #[naked]
   unsafe extern "C" fn trampoline() {
@@ -159,8 +160,6 @@ pub unsafe fn swap(new_stack: &Stack,
 
   asm!(
     r#"
-      # Link the call stacks together.
-      movq    %rsp, (%rcx)
       # Push instruction pointer of the old context and switch to
       # the new context.
       call    ${3:c}
@@ -169,7 +168,6 @@ pub unsafe fn swap(new_stack: &Stack,
       "+{rsi}" (arg0)
       "+{rdx}" (arg1)
     : "s" (trampoline as usize)
-      "{rcx}" (new_cfa)
     : "rax",   "rbx",   "rcx", /*"rdx",   "rsi",   "rdi",   "rbp",   "rsp",*/
       "r8",    "r9",    "r10",   "r11",   "r12",   "r13",   "r14",   "r15",
       "xmm0",  "xmm1",  "xmm2",  "xmm3",  "xmm4",  "xmm5",  "xmm6",  "xmm7",

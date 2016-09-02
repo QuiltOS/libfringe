@@ -58,7 +58,7 @@ impl<CStack> Context<CStack> where CStack: stack::Stack {
   pub unsafe fn swap(ctx_ptr: *mut Context<CStack>, arg: usize) -> usize {
     let new_sp = ptr::read(&(*ctx_ptr).stack_ptr as *const _);
     let (old_sp, old_spp, arg) = StackPointer::swap(
-      &(*ctx_ptr).stack,
+      Some(&mut (*ctx_ptr).stack),
       new_sp,
       &mut (*ctx_ptr).stack_ptr as *mut _ as usize,
       arg);
