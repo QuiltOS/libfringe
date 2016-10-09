@@ -55,7 +55,8 @@ pub unsafe fn init0<F>(stack: &Stack) -> (StackPointer, PhantomData<F>)
     where F: FnOnce(StackPointer) -> !
   {
     let closure: F = from_regs::<F>([a0]);
-    closure(sp)
+    let x: ! = closure(sp);
+    panic!()
   }
 
   let sp = StackPointer::init(stack, closure_wrapper::<F>);
@@ -151,7 +152,8 @@ mod test {
       let rets = init0(&stack);
       init1::<_, ()>(rets, None, move |initializer_sp| {
         debug!("made it!");
-        swap::<(), !>((), initializer_sp, None).1
+        let x: ! = swap::<(), !>((), initializer_sp, None).1;
+        panic!()
       })
     };
   }

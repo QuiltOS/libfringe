@@ -49,7 +49,7 @@ pub trait Cycle<'a>: Send + Sized + 'a
     where F: FnOnce(&mut ThreadLocals<Self::Stack>, Args<'a, Self>)
                     -> ! + Send + 'a
   {
-    Self::pack(Context::new(stack, |tl, a| f(tl, pack_args::<Self>(a))))
+    Self::pack(Context::new(stack, |tl, a| { let x: ! = f(tl, pack_args::<Self>(a)); panic!() }))
   }
 
   #[inline(always)]

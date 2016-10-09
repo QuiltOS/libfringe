@@ -66,7 +66,8 @@ impl<'a, Args, S> Context<'a, Args, S>
                                            initializer_sp,
                                            None);
         let args = Args::rebuild_raw(sp, payload);
-        fun_move(&mut tl_move, args)
+        let x:! = fun_move(&mut tl_move, args);
+        panic!()
       })
     };
     Context {
@@ -113,7 +114,7 @@ pub unsafe trait RebuildRaw<'a> {
 unsafe impl<'a> RebuildRaw<'a> for !
 {
   type PayloadRaw = !;
-  unsafe fn rebuild_raw(_sp: StackPointer, payload: !) -> ! { payload }
+  unsafe fn rebuild_raw(_sp: StackPointer, payload: !) -> ! { payload; panic!() }
 }
 
 
